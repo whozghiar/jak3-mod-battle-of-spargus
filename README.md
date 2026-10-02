@@ -22,7 +22,7 @@
 > because `master-dev` moved on without a new push landing here — run `task modding-branch-status`
 > or check GitHub Actions to audit fleet-wide mergeability.
 
-> **Contents:** [Overview](#overview) · [Key Features](#key-features) · [Download & Play](#download--play-via-opengoal-launcher-players) · [Developer Setup](#developer-setup--local-compilation) · [Demo Video](#demonstration-video) · [Compliance Checklist](#compliance-checklist) · [Technical Documentation](#technical-documentation)
+> **Contents:** [Overview](#overview) · [Key Features](#key-features) · [Download & Play](#download--play-via-opengoal-launcher-players) · [Developer Setup](#developer-setup--local-compilation) · [Demo Video](#demonstration-video) · [Technical Documentation](#technical-documentation)
 
 ---
 
@@ -106,15 +106,6 @@ task boot-game
 
 > [!NOTE]
 > *Demonstration videos must be hosted externally on YouTube to prevent repository bloating. Replace `YOUR_VIDEO_ID` with your YouTube video ID (e.g. `MnqnybexhSA` from `https://youtu.be/MnqnybexhSA`).*
-
-## Compliance Checklist
-- [ ] **Native non-regression:** with the mod compiled but its toggle OFF, the game plays identically to stock.
-- [ ] **In-game Mods toggle [MANDATORY FOR FEATURES]:** the mod registers at least one enable/disable entry via `(mods-menu-register "battle_of_spargus" ...)` (Jak 2 / Jak 3, opens with **L3 + SELECT**, works in a retail boot) or a `battle_of_spargus`-prefixed **debug-only** submenu (Jak 1). See [`docs/modding/guides/mods_menu.md`](docs/modding/guides/mods_menu.md).
-- [ ] **No direct `default-menu*.gc` edits.**
-- [ ] **Symbols prefixed** with the mod slug (`*mod-battle_of_spargus-*`, `mod-battle_of_spargus-*`).
-- [ ] **Verified Lisp instructions** used by this mod are present in `docs/modding/lisp_instructions.md` (landed on `master-dev` via `task modding-land-doc`).
-- [ ] **In-code comments** on every new/overridden type, method, state, macro.
-- [ ] **Mod cover thumbnail:** Optional cover image deposited at `docs/img/mod/mod_cover.png` for OpenGOAL Launcher display.
 
 ## Technical Documentation
 For the complete technical breakdown, architecture, and developer notes, refer to:
