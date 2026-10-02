@@ -3,7 +3,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/OpenGOAL-Mod-blue.svg" alt="OpenGOAL Mod">
   <img src="https://img.shields.io/badge/Game-Jak%203-orange.svg" alt="Target Game">
-  <img src="https://img.shields.io/badge/Branch-jak3%2Ffeatures%2Fbattle_of_spargus-green.svg" alt="Branch">
   <img src="https://img.shields.io/badge/AI--assisted-Modding-purple.svg" alt="AI Assisted">
 </p>
 
@@ -27,11 +26,14 @@
 
 ---
 
+> [!NOTE]
+> This mod moved from the `jak3/features/battle_of_spargus` branch of [whozghiar/jak-project](https://github.com/whozghiar/jak-project) to this repository. Earlier releases stay installable from the launcher catalog.
+
 ## Overview
 Brief, simple description of what this mod introduces or modifies in the game.
 
 - **Target Game:** Jak 3
-- **Active Branch:** `jak3/features/battle_of_spargus`
+- **Repository:** [`whozghiar/jak3-mod-battle-of-spargus`](https://github.com/whozghiar/jak3-mod-battle-of-spargus)
 
 ## Key Features
 - **Feature 1:** Simple description of the first key feature.
