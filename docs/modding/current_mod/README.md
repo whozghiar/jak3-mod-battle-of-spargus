@@ -25,7 +25,7 @@ developers, AI agents, and future maintainers.
 docs/modding/current_mod/<mod_slug>_readme.md
 ```
 
-(e.g. `docs/modding/current_mod/custom_animation_and_sound_readme.md`)
+(e.g. `docs/modding/current_mod/my-mod_readme.md`)
 
 ## 3. Recommended structure for mod technical readmes
 
@@ -40,8 +40,8 @@ Each technical mod document should adopt a structured, educational approach:
    ingestion.
 3. **What changed and why, described in prose.** Reference the exact GOAL
    syntax involved (a state, a hook, a macro) by name, and link to its
-   entry in the relevant per-game Lisp wiki
-   (`docs/modding/jak[1|2|3]_lisp_instructions.md`) rather than pasting the
+   entry in the Lisp wiki
+   (`.agents/skills/goal-lisp/wiki/`) rather than pasting the
    Lisp code into this document. GOAL/Lisp code examples live only in the
    wiki, so that the same pattern is never explained twice in two places
    that can drift apart.
@@ -55,7 +55,7 @@ Each technical mod document should adopt a structured, educational approach:
 
 ## 4. Texture packs for releases (`texture_packs/`)
 
-Any mod branch that provides a custom texture pack can store its packaged
+Any mod that provides a custom texture pack can store its packaged
 archive(s) inside:
 
 ```
@@ -64,8 +64,11 @@ docs/modding/current_mod/texture_packs/<slug>-v<version>.zip
 
 Why this directory:
 
-- **Git tracked:** unlike `custom_assets/jak*/texture_replacements/*`, this
-  directory is not ignored by `.gitignore`.
+- **Committed on purpose:** the folder's own `.gitignore` ignores `*.zip`, so
+  a work-in-progress pack is never committed by accident. Commit the pack you
+  ship with `git add -f docs/modding/current_mod/texture_packs/<file>.zip`:
+  the release workflow runs on a fresh checkout and only finds committed
+  archives.
 - **Branch-sync protected:** classified as "ours" in
   `scripts/modding/sync_common.py`, so it is never wiped or overwritten
   when merging `master-dev`.
@@ -73,3 +76,6 @@ Why this directory:
   automatically collects every `.zip` archive from this directory, computes
   its SHA-256 hash, registers it under `"texturePacks"` in `index.json`,
   and attaches it to the published GitHub Release.
+
+The OpenGOAL Launcher does not link a texture pack to a mod: its mod-source schema has no such field, it applies texture packs to the base game only, from a `.zip` the player adds in its Texture Packs screen, and its texture support for installed mods is not finished (checked on its `main` branch, 2026-10-02). Textures a mod needs belong in its own
+`custom_assets/<game>/texture_replacements/`, committed with `git add -f`.

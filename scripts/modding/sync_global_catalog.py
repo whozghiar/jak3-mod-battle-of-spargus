@@ -11,7 +11,7 @@ to see and install ALL published mods from this repository.
 
 Usage:
     python scripts/modding/sync_global_catalog.py
-    python scripts/modding/sync_global_catalog.py --repo whozghiar/jak-project
+    python scripts/modding/sync_global_catalog.py --repo <owner>/jak-project
     python scripts/modding/sync_global_catalog.py --offline
 """
 
@@ -32,7 +32,6 @@ if hasattr(sys.stderr, "reconfigure"):
   sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE_NAME = "Whozghiar OpenGOAL Mods Hub"
 BRANCH_RE = re.compile(r"raw\.githubusercontent\.com/[^/\s]+/[^/\s]+/(jak([123])/.+?)/docs/")
 
 
@@ -56,7 +55,7 @@ def get_default_repo() -> str:
   match = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", url)
   if match:
     return match.group(1)
-  return "whozghiar/jak-project"
+  return os.environ.get("GITHUB_REPOSITORY", "")
 
 
 def get_token() -> str:
@@ -77,6 +76,7 @@ def fetch_json(url: str, token: str):
 
 
 def fetch_all_releases(repo: str, token: str):
+  """All releases of repo, or None when GitHub could not be asked."""
   releases = []
   page = 1
   while True:
@@ -85,10 +85,10 @@ def fetch_all_releases(repo: str, token: str):
       batch = fetch_json(url, token)
     except urllib.error.HTTPError as err:
       print(f"Warning: HTTP {err.code} fetching releases (page {page}): {err}", file=sys.stderr)
-      break
+      return None if page == 1 else releases
     except Exception as err:
       print(f"Warning: Failed to fetch releases: {err}", file=sys.stderr)
-      break
+      return None if page == 1 else releases
     if not batch:
       break
     releases.extend(batch)
@@ -96,6 +96,42 @@ def fetch_all_releases(repo: str, token: str):
       break
     page += 1
   return releases
+
+
+# Topic that marks a mod repository (one GitHub repository per mod, created from master-dev
+# by scripts/modding/create_mod_repo.py). Its releases join the catalog next to this repository's.
+MOD_REPO_TOPIC = "opengoal-mod"
+
+
+def discover_mod_repos(owner: str, token: str) -> list[dict]:
+  repos = []
+  page = 1
+  while True:
+    try:
+      batch = fetch_json(f"https://api.github.com/users/{owner}/repos?per_page=100&page={page}", token)
+    except Exception as err:
+      print(f"Warning: could not list {owner}'s repositories: {err}", file=sys.stderr)
+      break
+    if not batch:
+      break
+    repos.extend(r for r in batch if MOD_REPO_TOPIC in (r.get("topics") or []))
+    if len(batch) < 100:
+      break
+    page += 1
+  return repos
+
+
+def mod_repo_entry(full_name: str, token: str) -> tuple[str | None, dict]:
+  """The catalog key a mod repository publishes and its entry: the single mod of its own
+  index.json, or just the `<slug>` of its `<game>-mod-<slug>` name when it has none yet."""
+  try:
+    mods = fetch_json(f"https://raw.githubusercontent.com/{full_name}/HEAD/index.json", token).get("mods") or {}
+  except Exception:
+    mods = {}
+  if len(mods) == 1:
+    return next(iter(mods.items()))
+  m = re.match(r"^jak[123]-(?:mod-)?(.+)$", full_name.split("/")[-1])
+  return (m.group(1) if m else None), {}
 
 
 def get_git_remote_branches() -> list[str]:
@@ -163,7 +199,7 @@ def load_catalog_from_release_asset(rel, token: str) -> dict | None:
   return None
 
 
-def get_offline_released_mods(remote_branches: list[str]):
+def get_offline_released_mods(remote_branches: list[str], repo: str):
   """Identify released mods strictly using git release tags (never arbitrary branches)."""
   print("Resolving published releases from git release tags (offline mode)...")
   res = subprocess.run(["git", "tag", "-l", "*-v*"], capture_output=True, text=True, cwd=REPO_ROOT)
@@ -188,7 +224,7 @@ def get_offline_released_mods(remote_branches: list[str]):
     synthetic_releases.append({
         "tag_name": latest_tag,
         "name": latest_tag,
-        "body": f"https://raw.githubusercontent.com/whozghiar/jak-project/{branch}/docs/img/mod/mod_cover.png",
+        "body": f"https://raw.githubusercontent.com/{repo}/{branch}/docs/img/mod/mod_cover.png",
         "published_at": datetime.now(timezone.utc).isoformat(),
         "assets": [],
         "inferred_branch": branch,
@@ -201,7 +237,7 @@ def get_offline_released_mods(remote_branches: list[str]):
 def collect_mods_from_releases(repo: str, token: str, offline: bool = False):
   """Collects published mods strictly by inspecting GitHub Releases and their catalogs."""
   remote_branches = get_git_remote_branches()
-  releases = []
+  releases = None
 
   if not offline:
     print(f"Fetching published releases for {repo}...")
@@ -209,10 +245,17 @@ def collect_mods_from_releases(repo: str, token: str, offline: bool = False):
       releases = fetch_all_releases(repo, token)
     except Exception as e:
       print(f"Warning: GitHub API call failed: {e}", file=sys.stderr)
-      releases = []
+      releases = None
 
-  if not releases:
-    releases = get_offline_released_mods(remote_branches)
+  if releases is None:
+    releases = get_offline_released_mods(remote_branches, repo)
+
+  mod_repos = [] if offline else discover_mod_repos(repo.split("/")[0], token)
+  for mod_repo in mod_repos:
+    print(f"Fetching published releases for mod repository {mod_repo['full_name']}...")
+    for rel in fetch_all_releases(mod_repo["full_name"], token) or []:
+      rel["_repo"] = mod_repo["full_name"]
+      releases.append(rel)
 
   print(f"Found {len(releases)} published release(s). Aggregating catalogs...")
 
@@ -248,7 +291,8 @@ def collect_mods_from_releases(repo: str, token: str, offline: bool = False):
       m_tag = re.match(r"^([a-zA-Z0-9_\-]+?)-v\d+", tag)
       if m_tag:
         canonical_slug = m_tag.group(1).replace("_", "-")
-        branch = find_branch_for_slug(canonical_slug, remote_branches)
+        # A mod repository's release carries its own catalog; its old branch here is history.
+        branch = None if "_repo" in rel else find_branch_for_slug(canonical_slug, remote_branches)
 
     # 1. Load data from release asset (if available)
     rel_catalog = load_catalog_from_release_asset(rel, token)
@@ -371,6 +415,16 @@ def collect_mods_from_releases(repo: str, token: str, offline: bool = False):
 
     print(f"  ✓ {tag}: aggregated successfully")
 
+  # A mod repository's own index.json is the source of truth for its name and description,
+  # and players are sent to the repository, even before its first release from there.
+  for mod_repo in mod_repos:
+    slug, entry = mod_repo_entry(mod_repo["full_name"], token)
+    if slug in aggregated_mods:
+      for attr in ("displayName", "description"):
+        if entry.get(attr):
+          aggregated_mods[slug][attr] = entry[attr]
+      aggregated_mods[slug]["websiteUrl"] = mod_repo["html_url"]
+
   return aggregated_mods, aggregated_texture_packs
 
 
@@ -429,8 +483,7 @@ def main():
   )
   parser.add_argument(
       "--source-name",
-      default=DEFAULT_SOURCE_NAME,
-      help=f"Display sourceName in Launcher (default: '{DEFAULT_SOURCE_NAME}')",
+      help="Display sourceName in Launcher (default: '<Owner> OpenGOAL Mods Hub')",
   )
   parser.add_argument(
       "--offline",
@@ -444,6 +497,10 @@ def main():
   )
 
   args = parser.parse_args()
+  if not args.repo:
+    raise SystemExit("Cannot tell the GitHub repository: pass --repo <owner>/jak-project.")
+  if not args.source_name:
+    args.source_name = f"{args.repo.split('/')[0].capitalize()} OpenGOAL Mods Hub"
   token = get_token()
 
   mods, texture_packs = collect_mods_from_releases(args.repo, token, offline=args.offline)
@@ -465,6 +522,15 @@ def main():
       print(f"  • [{game}] {name} ({k}) — {v_count} version(s) [tags: {', '.join(tags)}]")
 
   catalog = generate_global_catalog(mods, texture_packs, args.source_name)
+  # Nothing new since the last run: keep its timestamp, so the file stays as it is and the daily
+  # workflow commits nothing.
+  try:
+    previous = json.loads(Path(args.output).read_text(encoding="utf-8"))
+    if ({k: v for k, v in previous.items() if k != "lastUpdated"}
+        == {k: v for k, v in catalog.items() if k != "lastUpdated"}):
+      catalog["lastUpdated"] = previous.get("lastUpdated", catalog["lastUpdated"])
+  except (OSError, ValueError):
+    pass
   catalog_json = json.dumps(catalog, indent=2, ensure_ascii=False) + "\n"
 
   if args.dry_run:

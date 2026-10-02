@@ -6,7 +6,7 @@ https://github.com/open-goal/launcher/tree/main/schemas/mod-source/v1
 
 Usage:
     python scripts/modding/update_mod_catalog.py
-    python scripts/modding/update_mod_catalog.py --tag v1.0.0 --repo whozghiar/jak-project
+    python scripts/modding/update_mod_catalog.py --tag v1.0.0 --repo <owner>/jak-project
     python scripts/modding/update_mod_catalog.py --next-version
     python scripts/modding/update_mod_catalog.py --print-metadata
 """
@@ -19,6 +19,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+
+from sync_common import github_repo
 
 if hasattr(sys.stdout, "reconfigure"):
   sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -48,6 +50,28 @@ def get_current_branch() -> str:
       "git rev-parse --abbrev-ref HEAD"
   )
   return branch if branch else "master-dev"
+
+
+def mod_identity(index_path: Path, repo: str):
+  """Slug and game of the mod held by a mod repository (one GitHub repository per mod).
+
+  The repository's own index.json names exactly one mod: its key is the launcher catalog key,
+  kept verbatim (e.g. `jak3-jetBoard`), and supportedGames[0] is its game. A repository with no
+  catalog yet falls back to its name, `<game>-mod-<slug>` (e.g. `jak2-mod-blue-krimzon-guard`).
+  Returns (None, None) for anything else, such as the mother repository's global catalog.
+  """
+  try:
+    mods = json.loads(index_path.read_text(encoding="utf-8")).get("mods") or {}
+  except (OSError, ValueError):
+    mods = {}
+  if len(mods) == 1:
+    slug, entry = next(iter(mods.items()))
+    games = entry.get("supportedGames") or []
+    return slug, (games[0] if games else None)
+  m = re.match(r"^(jak[123])-(?:mod-)?(.+)$", repo.split("/")[-1])
+  if m:
+    return m.group(2), m.group(1)
+  return None, None
 
 
 def sanitize_source_name(name: str) -> str:
@@ -247,7 +271,8 @@ def get_next_version(index_path: Path, mod_slug: str = "") -> str:
   return candidate_tag
 
 
-def refresh_metadata_only(index_path, mod_id, display_name, description, supported_games, cover_url):
+def refresh_metadata_only(index_path, mod_id, display_name, description, supported_games, cover_url,
+                          website_url=None):
   """
   Update only a mod's display metadata (name, description, supported games, cover) in
   an EXISTING index.json entry — never touches `versions[]`, never invents a tag.
@@ -277,18 +302,23 @@ def refresh_metadata_only(index_path, mod_id, display_name, description, support
 
   before = json.dumps(mod_entry, sort_keys=True)
 
-  mod_entry["displayName"] = display_name
+  # A sync passes no display name: keep the released one instead of the branch or repository slug.
+  if display_name:
+    mod_entry["displayName"] = display_name
   mod_entry["description"] = description
   mod_entry["supportedGames"] = supported_games
   if cover_url:
     mod_entry["coverArtUrl"] = cover_url
     mod_entry["thumbnailArtUrl"] = cover_url
+  # A mod repository's page is the repository itself, which follows it through a rename.
+  if website_url:
+    mod_entry["websiteUrl"] = website_url
 
   if json.dumps(mod_entry, sort_keys=True) == before:
     print(f"[OK] '{mod_id}' metadata unchanged — {index_path} left as-is.")
     return
 
-  catalog["sourceName"] = sanitize_source_name(display_name)
+  catalog["sourceName"] = sanitize_source_name(mod_entry.get("displayName") or mod_id)
   catalog["lastUpdated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
   with open(index_path, "w", encoding="utf-8") as f:
@@ -407,9 +437,8 @@ def main():
   )
   parser.add_argument(
       "--repo",
-      default=os.environ.get("GITHUB_REPOSITORY")
-      or os.environ.get("REPO", "whozghiar/jak-project"),
-      help="GitHub repository owner/repo",
+      default=os.environ.get("GITHUB_REPOSITORY") or os.environ.get("REPO"),
+      help="GitHub repository owner/repo (default: where the branch publishes, read from its git remote)",
   )
   parser.add_argument(
       "--mod-id",
@@ -497,6 +526,13 @@ def main():
   args = parser.parse_args()
 
   branch = args.branch or get_current_branch()
+  if not args.repo:
+    # The repository the branch publishes to: mods/<name> tracks its mod repository.
+    remote = run_cmd(f"git config --get branch.{branch}.remote") or "origin"
+    found = github_repo(remote, REPO_ROOT)
+    if not found:
+      raise SystemExit(f"Cannot tell which GitHub repository {branch} publishes to: pass --repo <owner>/<name>.")
+    args.repo = "/".join(found)
   index_path = Path(args.index_file)
   if not index_path.is_absolute():
     index_path = REPO_ROOT / index_path
@@ -506,6 +542,7 @@ def main():
   # Determine target game and variable part of branch
   # Formats: jak[123]/[category]/[variable_part...]
   detected_game = "jak2"
+  repo_slug = None
   branch_match = re.match(r"^jak([123])/([^/]+)/(.+)$", branch)
   if branch_match:
     game_num = branch_match.group(1)
@@ -513,9 +550,17 @@ def main():
     variable_part = branch_match.group(3)
     detected_slug = variable_part.replace("/", "-").replace("_", "-")
   else:
-    parts = branch.split("/")
-    variable_part = parts[-1] if len(parts) > 1 else branch
-    detected_slug = branch.replace("/", "-").replace("_", "-")
+    # A mod repository: its branch (main) names nothing, its own catalog does.
+    repo_slug, repo_game = mod_identity(index_path, args.repo)
+    if repo_slug:
+      variable_part = detected_slug = repo_slug
+      detected_game = repo_game or detected_game
+    else:
+      parts = branch.split("/")
+      variable_part = parts[-1] if len(parts) > 1 else branch
+      detected_slug = branch.replace("/", "-").replace("_", "-")
+  website_url = (f"https://github.com/{args.repo}" if repo_slug
+                 else f"https://github.com/{args.repo}/tree/{branch}")
 
   # Mod metadata resolution
   disp_arg = args.display_name.strip() if args.display_name else ""
@@ -532,19 +577,22 @@ def main():
   cover_path = REPO_ROOT / "docs" / "img" / "mod" / "mod_cover.png"
   resolved_cover_url = args.cover_url
   if not resolved_cover_url and (cover_path.is_file() or branch.startswith(("jak1/", "jak2/", "jak3/"))):
-    resolved_cover_url = f"https://raw.githubusercontent.com/{args.repo}/{branch}/docs/img/mod/mod_cover.png"
+    # A mod repository publishes from main, whatever the local branch is called (mods/<name>).
+    cover_ref = "main" if repo_slug else branch
+    resolved_cover_url = f"https://raw.githubusercontent.com/{args.repo}/{cover_ref}/docs/img/mod/mod_cover.png"
 
   if args.metadata_only:
     refresh_metadata_only(
         index_path=index_path,
         mod_id=args.mod_id or detected_slug,
-        display_name=display_name,
+        display_name=disp_arg or None,
         description=description,
         supported_games=(
             [g.strip() for g in args.supported_games.split(",") if g.strip()]
             if args.supported_games else [detected_game]
         ),
         cover_url=resolved_cover_url,
+        website_url=website_url if repo_slug else None,
     )
     return
 
@@ -664,11 +712,12 @@ def main():
         "authors": authors,
         "tags": ["gameplay", "custom-engine"],
         "supportedGames": supported_games,
-        "websiteUrl": f"https://github.com/{args.repo}/tree/{branch}",
+        "websiteUrl": website_url,
         "versions": [],
     }
 
   mod_entry = catalog["mods"][mod_id]
+  mod_entry["websiteUrl"] = website_url
   mod_entry["displayName"] = display_name
   mod_entry["description"] = description
   mod_entry["supportedGames"] = supported_games
@@ -706,7 +755,7 @@ def main():
       repo=args.repo,
       branch=branch,
       detected_game=detected_game,
-      default_author=authors[0] if authors else "whozghiar",
+      default_author=authors[0] if authors else args.repo.split("/")[0],
       default_cover_url=resolved_cover_url,
   )
 
