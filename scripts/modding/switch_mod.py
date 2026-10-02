@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Switch this working directory between master-dev, the mod repositories and the mods still on a
-branch, the way `git switch` moved between mod branches.
+Switch this working directory between master-dev and the mod repositories, the way `git switch`
+moved between mod branches.
 
     task modding-switch -- jak2-mod-blue-krimzon-guard      # a mod repository
     task modding-switch -- master-dev                       # the modding base
-    task modding-switch -- jak2/features/haven-city-chaos   # a mod still on a branch
     task modding-switch -- --list                           # what you can switch to
+
+The old mod branches are archived as tags archive/<branch>; naming one prints how to restore it.
 
 Every mod repository shares its history with the mother repository (<owner>/jak-project), so one
 clone holds them all:
@@ -15,7 +16,7 @@ mods/<name>, created and fetched on first use; `git push` on it goes to that rep
 iso_data/, decompiler_out/, out/ and the sccache cache stay shared by every mod.
 
 Why not a bare `git switch`: on master-dev and in mod repositories, .agents/skills is the
-knowledge-base submodule, while the mods still on a branch carry a plain copy of the skills at
+knowledge-base submodule, while an old mod branch (restored from its archive) carries a plain copy of the skills at
 the same path, and git refuses to put one in place of the other. Before switching to such a
 branch, this script parks the submodule (after checking it holds no unpushed work). To come back
 from one, run `git switch master-dev` (or `git switch mods/<name>`) then `task kb-update`: those
